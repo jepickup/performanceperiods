@@ -58,18 +58,18 @@ def extract_flows(filename):
 
         flows.append(
                     FlowTuple(
-                                timestamp,
+                                int(int(timestamp, 16)/1e9),
                                 data_tuple[1],   #SrcIP
-                                data_tuple[2],   #DstIP
-                                data_tuple[3],   #SrcPort
+                                data_tuple[3],   #DstIP
+                                data_tuple[2],   #SrcPort
                                 data_tuple[4],   #DstPort
                                 data_tuple[6],   #Bytes
                                 data_tuple[5],   #Packets
-                                data_tuple[0]   #Protocol
+                                data_tuple[0]    #Protocol
                                 )
                     )
 
 
 flow_list = extract_flows('Flows-20110619231749.data')
 
-print(len(flow_list))
+print(len(flow_list),"flows extracted")
