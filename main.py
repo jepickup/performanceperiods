@@ -1,9 +1,9 @@
 """
     performanceperiods
     ---
-    Extracts useful metrics from hwdb .data files that
-    are mapped onto graphs to assess the feasability
-    of metrics for signalling network health to a user
+    Extracts useful metrics from hwdb .data files
+    and then maps them onto graphs to assess their
+    feasibility for demonstrating network health
     ---
     Author: James Pickup <FORENAME AT eSURNAME dot co dot uk>
     ---
@@ -25,50 +25,29 @@ def extract_flows(filename):
     
     flows = []
     f = open(filename, 'r')
-
-    if( f.read(1) != '@' ):
-        print("File must begin with @")
-        sys.exit(0)
-
-    while True:
-        timestamp   = ""
-        data        = ""
-
-        #Read timestamp
-        time_byte = f.read(1)
-
-        while( time_byte != '@' ):
-            timestamp += time_byte
-            time_byte = f.read(1)
-                        
-        #Read data up until next timestamp
-        data_byte = f.read(1)
-        while( data_byte != '@' ):
-            #No more data
-            if data_byte == '':
-                f.close()
-                return flows
-            data += data_byte
-            data_byte = f.read(1)
-
-        #Remove leading and trailing <|>
-        data = data[3:-4]
-
-        data_tuple = data.split('<|>')
+    flow_lines = f.read().split('\n')
+    
+    for line in flow_lines:
+        data_tuple = line.split('<|>')
+        
+        #Empty last line, dumb but works
+        if(data_tuple[0] == ''):
+                break
 
         flows.append(
-                    FlowTuple(
-                                int(int(timestamp, 16)/1e9),
-                                data_tuple[1],   #SrcIP
-                                data_tuple[3],   #DstIP
-                                data_tuple[2],   #SrcPort
-                                data_tuple[4],   #DstPort
-                                data_tuple[6],   #Bytes
-                                data_tuple[5],   #Packets
-                                data_tuple[0]    #Protocol
-                                )
-                    )
-
+                FlowTuple(
+                        int(int((data_tuple[0])[1:-1], 16)/1e9), #Timestamp
+			data_tuple[2],   #SrcIP
+			data_tuple[4],   #DstIP
+			data_tuple[3],   #SrcPort
+			data_tuple[5],   #DstPort
+			data_tuple[7],   #Bytes
+		        data_tuple[6],   #Packets
+			data_tuple[1]    #Protocol
+                	)
+		)
+	
+    return flows
 
 flow_list = extract_flows('Flows-20110619231749.data')
 
