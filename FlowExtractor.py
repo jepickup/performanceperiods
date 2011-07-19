@@ -17,11 +17,6 @@ from math import floor
 
 class FlowExtractor:
 
-    #Data structure for storing individual flow entries
-    FlowTuple = collections.namedtuple('FlowTuple', 'Timestamp SrcIP DstIP SrcPort DstPort Bytes Packets Protocol')
-
-    flow_count          = 0
-
     #Converts hexadecimal packet data into integer form
     def hex_to_int(self, asc):
         h_string = ""
@@ -33,11 +28,13 @@ class FlowExtractor:
 
         return int(h_string, 16)
 
-    def hwdb_extract(self, filename):
+    def hwdb_extract(self, filename, BIN_SIZE):
 
-        flow_list = []
         f = open(filename, 'r')
         flow_lines = f.read().split('\n')
+
+        flow_time_bins = []
+        base_timestamp = int(int(((((flow_lines[0]).split('<|>'))[0]))[1:-1], 16)/1e9)
 
         for line in flow_lines:
             data_tuple = line.split('<|>')
@@ -46,21 +43,34 @@ class FlowExtractor:
             if(data_tuple[0] == ''):
                     break
 
-            flow_list.append(
-                    self.FlowTuple(
-                            int(int((data_tuple[0])[1:-1], 16)/1e9), #Timestamp
-                            data_tuple[2],   #SrcIP
-                            data_tuple[4],   #DstIP
-                            int(data_tuple[3]),   #SrcPort
-                            int(data_tuple[5]),   #DstPort
-                            int(data_tuple[7]),   #Bytes
-                            int(data_tuple[6]),   #Packets
-                            int(data_tuple[1])    #Protocol
+            flow_key = (
+                            data_tuple[2],      #SrcIP
+                            data_tuple[4],      #DstIP
+                            int(data_tuple[3]), #SrcPort
+                            int(data_tuple[5]), #DstPort
+                            int(data_tuple[1])  #Protocol
+                        )
+
+            flow_value = (
+                                int(data_tuple[7]), #Bytes
+                                int(data_tuple[6]), #Packets
+                                1                   #Count
                             )
-                    )
 
-        return flow_list
+            flow_timestamp = int(int((data_tuple[0])[1:-1], 16)/1e9)
+            bin_index = floor( (flow_timestamp - base_timestamp) / BIN_SIZE)
 
+            if bin_index >= len(flow_time_bins):
+                flow_time_bins.append({})
+            
+            if flow_key in (flow_time_bins[bin_index]):
+                (flow_time_bins[bin_index])[flow_key] = tuple(map(sum,zip( (flow_time_bins[bin_index])[flow_key], flow_value )))
+            else:
+                (flow_time_bins[bin_index])[flow_key] = flow_value
+
+        return flow_time_bins
+
+    """
     #Extracts individual flow entries per packet from a .pcap file of NetFlow v5 UDP packets
     def pcap_extract(self, filename):
         
@@ -81,10 +91,10 @@ class FlowExtractor:
             SrcIP, DstIP 	= socket.inet_ntoa(flow_packet[0:4]), socket.inet_ntoa(flow_packet[4:8])
             SrcPort, DstPort	= self.hex_to_int(flow_packet[32:34]), self.hex_to_int(flow_packet[34:36])
 
-            """
+
             TBD - Start or End time for flow timestamp
             self.hex_to_int(flow_packet[28:32]) / 1000,	#EndTime
-            """
+
             flow_list.append(
                             self.FlowTuple(
                                 self.hex_to_int(flow_packet[24:28]) / 1000,	#StartTime - Timestamp
@@ -102,21 +112,7 @@ class FlowExtractor:
             self.flow_count += 1
 
         return flow_list
-
-    def convert_bytes(self,bytes):
-        bytes = float(bytes)
-        if bytes >= 1073741824:
-            gigabytes = bytes / 1073741824
-            size = '%.2fG' % gigabytes
-        elif bytes >= 1048576:
-            megabytes = bytes / 1048576
-            size = '%.2fM' % megabytes
-        elif bytes >= 1024:
-            kilobytes = bytes / 1024
-            size = '%.2fK' % kilobytes
-        else:
-            size = '%.2fb' % bytes
-        return size
+    """
 
     def __init__(self):
         pass
@@ -128,28 +124,3 @@ if __name__ == "__main__":
     FE = FlowExtractor()
     flows = FE.hwdb_extract('Flows-20110620000001.data')
     print(len(flows),"flows extracted")
-
-    flow_time_bins = []
-    
-    base_timestamp = flows[0].Timestamp
-    
-    for flow in flows:
-        bin_index = floor( (flow.Timestamp - base_timestamp) / 60 )
-
-        if bin_index >= len(flow_time_bins):
-            flow_time_bins.append([])
-        
-        (flow_time_bins[bin_index]).append(flow)
-
-    for bin_index, bin in enumerate(flow_time_bins):
-        bin_bytes = bin_packets = 0
-
-        for flow in bin:
-            bin_bytes += flow.Bytes
-            bin_packets += flow.Packets
-
-        print("Time", str(bin_index) + ", Bytes:", FE.convert_bytes(bin_bytes), "Packets:", bin_packets);
-        
-# Method 2: Separation by number of flows
-
-# Method 3: Dynamic separation by flows/time ?
