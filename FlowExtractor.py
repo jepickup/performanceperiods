@@ -13,42 +13,105 @@
 """
 
 import sys, collections, time
+import re
 from math import floor
+from datetime import datetime
+from time import mktime
 
 class FlowExtractor:
+ 
+    def calculate_breakdown(self, flows):
 
-    #Converts hexadecimal packet data into integer form
-    def hex_to_int(self, asc):
-        h_string = ""
-        for x in asc:
-            h_string += "%02X" % ord(x)
+        breakdown               = {}
+        breakdown['protocols']  = {}
+        breakdown['internal']   = {} # IP: { 'in_bytes/pkts/flows':0, 'out_bytes/pkts/flows':0 }
+        breakdown['external']   = {}
 
-        if h_string == "":
-            h_string = "0x00"
+        ip_match = re.compile('^192\.')
 
-        return int(h_string, 16)
+        for flow_key, flow_data in flows.items():
+
+            SrcIP, DstIP = flow_key[0], flow_key[1]
+
+            if ip_match.match(flow_key[0]):
+                IntIP, ExtIP = flow_key[0], flow_key[1]
+            elif ip_match.match(flow_key[1]):
+                IntIP, ExtIP = flow_key[1], flow_key[0]
+            else:
+                continue # Ignore non-host flows?
+
+            if IntIP not in breakdown['internal']:
+                (breakdown['internal'])[IntIP] = {
+                                                    'in_bytes'  : 0,
+                                                    'in_pkts'   : 0,
+                                                    'in_flows'  : 0,
+                                                    'out_bytes' : 0,
+                                                    'out_pkts'  : 0,
+                                                    'out_flows' : 0
+                                                }
+
+            if ExtIP not in breakdown['external']:
+                (breakdown['external'])[ExtIP] = {
+                                                    'in_bytes'  : 0,
+                                                    'in_pkts'   : 0,
+                                                    'in_flows'  : 0,
+                                                    'out_bytes' : 0,
+                                                    'out_pkts'  : 0,
+                                                    'out_flows' : 0
+                                                }
+
+            if SrcIP == IntIP:  # Internal outbound
+                ((breakdown['internal'])[IntIP])['out_bytes']   += flow_data[0] 
+                ((breakdown['internal'])[IntIP])['out_pkts']    += flow_data[1]
+                ((breakdown['internal'])[IntIP])['out_flows']   += flow_data[2]
+                ((breakdown['external'])[ExtIP])['out_bytes']   += flow_data[0] 
+                ((breakdown['external'])[ExtIP])['out_pkts']    += flow_data[1]
+                ((breakdown['external'])[ExtIP])['out_flows']   += flow_data[2]
+            else:               # Internal inbound
+                ((breakdown['internal'])[IntIP])['in_bytes']   += flow_data[0] 
+                ((breakdown['internal'])[IntIP])['in_pkts']    += flow_data[1]
+                ((breakdown['internal'])[IntIP])['in_flows']   += flow_data[2]
+                ((breakdown['external'])[ExtIP])['in_bytes']   += flow_data[0] 
+                ((breakdown['external'])[ExtIP])['in_pkts']    += flow_data[1]
+                ((breakdown['external'])[ExtIP])['in_flows']   += flow_data[2]
+
+            breakdown['total_bytes']                = flow_data[0]
+            breakdown['total_pkts']                 = flow_data[1]
+            breakdown['total_flows']                = flow_data[2]
+
+            if flow_key[2] not in breakdown['protocols']:
+                (breakdown['protocols'])[flow_key[4]] = 0
+
+            (breakdown['protocols'])[flow_key[4]] += flow_data[2]
+
+            #Wireless signal TODO
+        return breakdown
 
     def hwdb_extract(self, filename, BIN_SIZE):
 
         f = open(filename, 'r')
         flow_lines = f.read().split('\n')
+        flow_breakdowns = {}
+        flow_bin = {}
 
-        flow_time_bins = []
-        base_timestamp = int(int(((((flow_lines[0]).split('<|>'))[0]))[1:-1], 16)/1e9)
+        start_timestamp = base_timestamp = mktime( (datetime.strptime((flow_lines[0])[0:19], "%Y/%m/%d:%H:%M:%S")).timetuple() )
+        end_timestamp = start_timestamp + BIN_SIZE
 
         for line in flow_lines:
-            data_tuple = line.split('<|>')
 
-            #Empty last line, dumb but works
-            if(data_tuple[0] == ''):
-                    break
+            if(len(line) == 0):
+                break
+
+            flow_timestamp = mktime( (datetime.strptime(line[0:19], "%Y/%m/%d:%H:%M:%S")).timetuple() )
+
+            data_tuple = line[20:].split(':')
 
             flow_key = (
-                            data_tuple[2],      #SrcIP
-                            data_tuple[4],      #DstIP
+                            data_tuple[1],      #SrcIP
+                            data_tuple[2],      #DstIP
                             int(data_tuple[3]), #SrcPort
-                            int(data_tuple[5]), #DstPort
-                            int(data_tuple[1])  #Protocol
+                            int(data_tuple[4]), #DstPort
+                            int(data_tuple[0])  #Protocol
                         )
 
             flow_value = (
@@ -57,62 +120,21 @@ class FlowExtractor:
                                 1                   #Count
                             )
 
-            flow_timestamp = int(int((data_tuple[0])[1:-1], 16)/1e9)
-            bin_index = floor( (flow_timestamp - base_timestamp) / BIN_SIZE)
-
-            if bin_index >= len(flow_time_bins):
-                flow_time_bins.append({})
-            
-            if flow_key in (flow_time_bins[bin_index]):
-                (flow_time_bins[bin_index])[flow_key] = tuple(map(sum,zip( (flow_time_bins[bin_index])[flow_key], flow_value )))
+            if flow_timestamp >= start_timestamp and flow_timestamp < end_timestamp:
+                if flow_key in flow_bin:
+                    flow_bin[flow_key] = tuple(map(sum,zip( flow_bin[flow_key], flow_value )))
+                else:
+                    flow_bin[flow_key] = flow_value
+            elif flow_timestamp < start_timestamp:
+                sys.exit("Error, past flow after present flow")
             else:
-                (flow_time_bins[bin_index])[flow_key] = flow_value
+                flow_breakdowns[start_timestamp] = self.calculate_breakdown(flow_bin)
+                flow_bin.clear()
+                start_timestamp = end_timestamp
+                end_timestamp = start_timestamp + BIN_SIZE
+                #break
 
-        return flow_time_bins
-
-    """
-    #Extracts individual flow entries per packet from a .pcap file of NetFlow v5 UDP packets
-    def pcap_extract(self, filename):
-        
-        flow_list = []
-        system_uptime = system_timestamp = 0
-        p = pcap.pcapObject()
-        packet_data = p.open_offline(filename)
-	
-        if not system_uptime or not self.system_timestamp:
-            system_uptime 	= self.hex_to_int(packet_data[46:50]) / 1000 	#Seconds since RFlow started
-            system_timestamp 	= self.hex_to_int(packet_data[50:54])			#UNIX timestamp of router
-            flow_packet = packet_data[66:] #Shift past header
-            
-        start_count = self.flow_count #Hold position to calculate FlowSequence
-        
-        while(len(flow_packet) > 0):
-
-            SrcIP, DstIP 	= socket.inet_ntoa(flow_packet[0:4]), socket.inet_ntoa(flow_packet[4:8])
-            SrcPort, DstPort	= self.hex_to_int(flow_packet[32:34]), self.hex_to_int(flow_packet[34:36])
-
-
-            TBD - Start or End time for flow timestamp
-            self.hex_to_int(flow_packet[28:32]) / 1000,	#EndTime
-
-            flow_list.append(
-                            self.FlowTuple(
-                                self.hex_to_int(flow_packet[24:28]) / 1000,	#StartTime - Timestamp
-                                SrcIP,						#SrcIP
-                                DstIP,						#DstIP
-                                SrcPort,					#SrcPort
-                                DstPort,					#DstPort
-                                int(self.hex_to_int(flow_packet[20:24])), 	#Bytes, (logarithm to base 2 and rounded to an integer)
-                                int(self.hex_to_int(flow_packet[16:20])),	#Packets, (logarithm to base 2 and rounded to an integer)
-                                self.hex_to_int(flow_packet[38]),		#Protocol
-                                )
-                            )
-
-            flow_packet = flow_packet[48:] #Shift to next flow entry
-            self.flow_count += 1
-
-        return flow_list
-    """
+        return flow_breakdowns
 
     def __init__(self):
         pass
@@ -122,5 +144,5 @@ if __name__ == "__main__":
 # Method 1: Separation by time
 
     FE = FlowExtractor()
-    flows = FE.hwdb_extract('Flows-20110620000001.data')
+    flows = FE.hwdb_extract('data/FLOWS/Flow20101219000001.db.dt', 60)
     print(len(flows),"flows extracted")

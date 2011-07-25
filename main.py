@@ -5,67 +5,51 @@
     ---
 """
 
-import re
-from math import floor
 from FlowExtractor import FlowExtractor
+from pyrrd.rrd import RRD, RRA, DS
+from pyrrd.graph import DEF, CDEF, VDEF
+from pyrrd.graph import LINE, AREA, GPRINT
+from pyrrd.graph import ColorAttributes, Graph
 
 BIN_SIZE = 60
 
-def convert_bytes(bytes):
-    bytes = float(bytes)
-    if bytes >= 1073741824:
-        gigabytes = bytes / 1073741824
-        size = '%.2fG' % gigabytes
-    elif bytes >= 1048576:
-        megabytes = bytes / 1048576
-        size = '%.2fM' % megabytes
-    elif bytes >= 1024:
-        kilobytes = bytes / 1024
-        size = '%.2fK' % kilobytes
-    else:
-        size = '%.2fb' % bytes
-    return size
-
 # Method 1: Separation by time
 
-# Flow statistics
-total_bytes = total_packets = total_occurrences = 0
-
 FE = FlowExtractor()
-flows = FE.hwdb_extract('Flows-20110620000001.data', BIN_SIZE)
-print(len(flows), str(BIN_SIZE) + "-second periods extracted")
+flows = FE.hwdb_extract('data/FLOWS/Flow20101219000001.db.dt', BIN_SIZE)
 
-ip_time_bins = {}
+keys = flows.keys()
+keys.sort()
 
-ip_match = re.compile('^10.')
+startTime = int(keys[0])
+filename = 'perf.rrd'
 
-for time, time_bin in enumerate(flows):
+dss, rras = [], []
 
-    for fkey, fdata in time_bin.items():
-        
-        if ip_match.match((fkey[0])):
-            InternalIP = fkey[0]
-        else:
-            InternalIP = fkey[1]
+dss.append(DS(dsName='total_bytes', dsType='ABSOLUTE', heartbeat=900))
 
-        total_bytes += fdata[0]
-        total_packets += fdata[1]
-        total_occurrences += fdata[2]
-        
-        data_tuple = ( fdata[0], fdata[1], fdata[2] )
-       
-        if (time, InternalIP) in ip_time_bins:
-            ip_time_bins[ (time, InternalIP) ] = tuple(map(sum,zip( ip_time_bins[ (time, InternalIP) ], data_tuple)))
-        else:
-            ip_time_bins[ (time, InternalIP) ] = data_tuple
+# 1 days-worth of one-minute samples --> 60/1 * 24
+rra1 = RRA(cf='AVERAGE', xff=0, steps=1, rows=1440)
+# 7 days-worth of five-minute samples --> 60/5 * 24 * 7
+rra2 = RRA(cf='AVERAGE', xff=0, steps=5, rows=2016)
+# 30 days-worth of five-minute samples --> 60/60 * 24 * 30
+rra3 = RRA(cf='AVERAGE', xff=0, steps=60, rows=720)
+rras.extend([rra1, rra2, rra3])
 
-ip_tb_list = list(ip_time_bins)
-ip_tb_list.sort()
+myRRD = RRD(filename, step=60, ds=dss, rra=rras, start=startTime-60)
+myRRD.create(debug=False)
 
-print( "IP-Timestamps:", len(ip_tb_list) )
-print( "Bandwidth:", convert_bytes(total_bytes) )
-print( "Packets:", convert_bytes(total_packets) )
-print( "Occurrences:", total_occurrences )
+counter = 0
+for flow_key in keys:
+    print "Adding to RRD" + str(flow_key) + " " + str(int(flow_key))
+    myRRD.bufferValue(int(flow_key), (flows[flow_key])['total_bytes'])
+    counter += 1
+    if counter % 100 == 0:
+        myRRD.update()
+
+myRRD.update()
+
+print myRRD
 
 # Method 2: Separation by number of flows
 
