@@ -1,0 +1,123 @@
+<html>
+
+<head>
+
+<style type="text/css">
+
+#header {
+	text-align: center;
+	font-size: 16px;
+}
+
+.sector {
+	//padding-bottom: 5px;
+	width: 1895px;
+	height: 184px;
+    //border-bottom: 1px solid black;
+}
+
+.inner {
+	height: 100%;
+	//padding: 3px;
+	float: left;
+	//border: 1px solid blue;
+    text-align:center;
+}
+
+.quarter { width: 467px; }
+.third { width: 630px; }
+.half  { width: 931px; }
+.whole { width: 1870px;  }
+
+</style>
+
+<script type="text/javascript" src="data.js"></script>
+<script type="text/javascript" src="population.js"></script>
+
+</head>
+
+<body onload="javascript:populateTime();">
+
+<div id="header">
+    <select id="time" onchange="updateTime()"></select>
+    <select id="interval" onchange="updateTime()">                                           
+        <option value="24" selected>24 Hour</option>
+        <option value="0">00:00-07:59</option>
+        <option value="8">08:00-15:59</option>
+        <option value="16">16:00-23:59</option>
+    </select>
+    <select id="loc" onchange="updateLoc()"></select>
+</div>
+
+<div id="absolutes" class="sector">
+	<div class="third inner">
+        <span>Total Bytes</span>
+        <img id="total_bytes" src="1289779201/graphs/network_total_bytes.png"/>
+    </div>
+    <div class="third inner">
+        <span>Total Packets</span>
+        <img id="total_pkts" src="1289779201/graphs/network_total_pkts.png"/>
+    </div>
+    <div class="third inner">
+        <span>Total Flows</span>
+        <img id="total_flows" src="1289779201/graphs/network_total_flows.png"/>
+    </div>
+</div>
+
+<div id="logs" class="sector">
+	<div class="third inner">
+        <span>log2( Total Bytes )</span>
+        <img id="total_log_bytes" src="1289779201/graphs/network_total_log_bytes.png"/>
+    </div>
+    <div class="third inner">
+        <span>log2( Total Packets )</span>
+        <img id="total_log_pkts" src="1289779201/graphs/network_total_log_pkts.png"/>
+    </div>
+    <div class="third inner">
+        <span>log2( Total Flows )</span>
+        <img id="total_log_flows" src="1289779201/graphs/network_total_log_flows.png"/>
+    </div>
+</div>
+
+<div id="invso" class="sector"  style="height: 170px">
+    <div class="third inner">
+        <span>Bytes In(+) vs Bytes Out(-)</span>
+        <img id="ivo_bytes" src="1289779201/graphs/network_ivo_bytes.png"/>
+    </div>
+    <div class="third inner">
+        <span>Packets In(+) vs Packets Out(-)</span>
+        <img id="ivo_pkts" src="1289779201/graphs/network_ivo_pkts.png"/>
+    </div>
+    <div class="third inner">
+        <span>Flows In(+) vs Flows Out(-)</span>
+        <img id="ivo_flows" src="1289779201/graphs/network_ivo_flows.png"/>
+    </div>
+</div>
+<div id="entropies" class="sector">
+	<div class="quarter inner">        
+        <span>Internal IP Entropy</span>
+        <img id="int_ip_entropy" src="1289779201/graphs/network_int_ip_entropy.png"/>
+    </div>
+    <div class="quarter inner">
+        <span>Delta Internal IP Entropy</span>
+        <img id="d_int_ip_entropy" src="1289779201/graphs/network_d_int_ip_entropy.png"/>
+    </div>
+	<div class="quarter inner">
+        <span>External IP Entropy</span>
+        <img id="ext_ip_entropy" src="1289779201/graphs/network_ext_ip_entropy.png"/>
+    </div>
+    <div class="quarter inner">
+        <span>Delta External IP Entropy</span>
+        <img id="d_ext_ip_entropy" src="1289779201/graphs/network_d_ext_ip_entropy.png"/>
+    </div>
+</div>
+<div id="wireless" class="sector" style="height:147px">
+	<div class="whole inner">
+        <span>Wireless retries</span>
+        <img id="wireless_retries" src="1289779201/graphs/network_wireless_retries.png"/>
+    </div>
+</div>
+
+</body>
+
+</html>

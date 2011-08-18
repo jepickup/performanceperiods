@@ -13,42 +13,219 @@
 """
 
 import sys, collections, time
+import re
 from math import floor
+from datetime import datetime
+from time import mktime
 
 class FlowExtractor:
 
-    #Converts hexadecimal packet data into integer form
-    def hex_to_int(self, asc):
-        h_string = ""
-        for x in asc:
-            h_string += "%02X" % ord(x)
+    def retrieve_retries(self):
+        
+        #Step 1: Create a timeline of DHCP leases
 
-        if h_string == "":
-            h_string = "0x00"
+        #DHCP file
+        df = open('data/DHCP/dhcp' + self.filedate + '.db.dh', 'r')
+        dhcp_lines = df.read().split('\n')
+        
+        dhcp_leases = {}
+        
+        for dhcp_line in dhcp_lines:
+            
+            if(len(dhcp_line) == 0):
+                break
 
-        return int(h_string, 16)
+            dhcp_data = dhcp_line.split(';')
+            dhcp_time = mktime( (datetime.strptime(dhcp_data[0], "%Y/%m/%d:%H:%M:%S")).timetuple() )	
 
-    def hwdb_extract(self, filename, BIN_SIZE):
+            action, mac, ip = dhcp_data[1], dhcp_data[2].replace(':', ''), dhcp_data[3]
 
-        f = open(filename, 'r')
-        flow_lines = f.read().split('\n')
+            if mac not in dhcp_leases:
+                dhcp_leases[mac] = []
 
-        flow_time_bins = []
-        base_timestamp = int(int(((((flow_lines[0]).split('<|>'))[0]))[1:-1], 16)/1e9)
+            if action == "add":
+                (dhcp_leases[mac]).append( (dhcp_time, dhcp_time+86400, ip) )
+            elif action == "upd" or action == "old":
+                if len(dhcp_leases[mac]) > 0:
+                    original_tuple = dhcp_leases[mac][ len(dhcp_leases[mac]) - 1 ]
+                    ((dhcp_leases[mac])[ len(dhcp_leases[mac]) - 1 ]) = (original_tuple[0], dhcp_time, ip)
+                (dhcp_leases[mac]).append( (dhcp_time, dhcp_time+86400, ip) )
+            elif action == "del":
+                if len(dhcp_leases[mac]) > 0:
+                    original_tuple = dhcp_leases[mac][ len(dhcp_leases[mac]) - 1 ]
+                    ((dhcp_leases[mac])[ len(dhcp_leases[mac]) - 1 ]) = (original_tuple[0], dhcp_time, ip)
+            else:
+                print "Unknown action!"
+                continue
+
+        #Step 2: Step through link events, updating DHCP table and recording nretries
+
+        #Link file
+        lf = open('data/LINKS/link' + self.filedate + '.db.lt', 'r')
+        link_lines = lf.read().split('\n')
+
+        dhcp_time = 0
+        lease_table = {}
+        latest_time = 0
+        for link_line in link_lines:
+            
+            if len(link_line) == 0:
+                break
+
+            link_time = int(int(link_line[1:17], 16)/1e9)
+            link_line = link_line[19:]
+
+            link_data = link_line.split(';')
+
+            mac, nretries = link_data[0], link_data[2]
+
+            del_table = []
+            #Bring DHCP leases up to speed
+            if dhcp_time < link_time:
+                for mac_lease in dhcp_leases:
+                    lease_count = 0
+                    while len(dhcp_leases[mac_lease]) > 0:
+                        lease_record = dhcp_leases[mac_lease][0]
+                        if link_time >= lease_record[0] and link_time < lease_record[1]:
+                            lease_table[mac_lease] = lease_record[2]
+                            latest_time = link_time 
+                            break
+                        elif link_time >= lease_record[0]:
+                            del( dhcp_leases[mac_lease][0] )
+                            if mac_lease in lease_table:
+                                del( lease_table[mac_lease] )
+                        else:
+                            latest_time = link_time 
+                            break
+            dhcp_time = latest_time 
+            bdkeys = self.breakdowns.keys()
+            bdkeys.sort(reverse=True)
+            ts = [i for i in bdkeys if i < link_time]
+            if ts:
+                ts = max(ts)
+                if mac in lease_table and int(nretries) > 0 and (ts+60 > link_time):
+                    ip = lease_table[mac]
+                    self.breakdowns[ts]['nretries'] += int(nretries)
+                    if ip in self.breakdowns[ts]['internal']:
+                        self.breakdowns[ts]['internal'][ip]['nretries'] += int(nretries)
+
+    def calculate_breakdown(self, flows):
+
+        breakdown =     {
+                            'protocols'    	: {},
+                            'internal'         : {}, # IP: { 'in_bytes/pkts/flows':0, 'out_bytes/pkts/flows':0 }
+                            'external'         : {},
+                            'nretries'         : 0,
+                            'in_bytes'       	: 0,
+                            'out_bytes'       	: 0,
+                            'in_pkts'       	: 0,
+                            'out_pkts'    	: 0,
+                            'in_flows'         : 0,
+                            'out_flows'     : 0
+                        }
+
+        ip_match = re.compile('^192\.168')
+
+        for flow_key, flow_data in flows.items():
+
+            SrcIP, DstIP = flow_key[0], flow_key[1]
+
+            if ip_match.match(flow_key[0]):
+                IntIP, ExtIP = flow_key[0], flow_key[1]
+            elif ip_match.match(flow_key[1]):
+                IntIP, ExtIP = flow_key[1], flow_key[0]
+            else:
+                continue # Ignore non-host flows?
+
+            if IntIP not in self.ip_list:
+                self.ip_list.append(IntIP)
+
+            if IntIP not in breakdown['internal']:
+                (breakdown['internal'])[IntIP] = {
+                                                    'in_bytes'  : 0,
+                                                    'in_pkts'   : 0,
+                                                    'in_flows'  : 0,
+                                                    'out_bytes' : 0,
+                                                    'out_pkts'  : 0,
+                                                    'out_flows' : 0,
+                                                    'nretries'  : 0
+                                                }
+
+            if ExtIP not in breakdown['external']:
+                (breakdown['external'])[ExtIP] = {
+                                                    'in_bytes'  : 0,
+                                                    'in_pkts'   : 0,
+                                                    'in_flows'  : 0,
+                                                    'out_bytes' : 0,
+                                                    'out_pkts'  : 0,
+                                                    'out_flows' : 0
+                                                }
+
+            if SrcIP == IntIP:  # Outbound
+                ((breakdown['internal'])[IntIP])['out_bytes']   += flow_data[0] 
+                ((breakdown['internal'])[IntIP])['out_pkts']    += flow_data[1]
+                ((breakdown['internal'])[IntIP])['out_flows']   += flow_data[2]
+                ((breakdown['external'])[ExtIP])['out_bytes']   += flow_data[0] 
+                ((breakdown['external'])[ExtIP])['out_pkts']    += flow_data[1]
+                ((breakdown['external'])[ExtIP])['out_flows']   += flow_data[2]
+                breakdown['out_bytes'] += flow_data[0]
+                breakdown['out_pkts'] += flow_data[1]
+                breakdown['out_flows'] += flow_data[2]
+            else:               # Inbound
+                ((breakdown['internal'])[IntIP])['in_bytes']   += flow_data[0] 
+                ((breakdown['internal'])[IntIP])['in_pkts']    += flow_data[1]
+                ((breakdown['internal'])[IntIP])['in_flows']   += flow_data[2]
+                ((breakdown['external'])[ExtIP])['in_bytes']   += flow_data[0] 
+                ((breakdown['external'])[ExtIP])['in_pkts']    += flow_data[1]
+                ((breakdown['external'])[ExtIP])['in_flows']   += flow_data[2]
+                breakdown['in_bytes'] += flow_data[0]
+                breakdown['in_pkts'] += flow_data[1]
+                breakdown['in_flows'] += flow_data[2]
+
+            if flow_key[2] not in breakdown['protocols']:
+                (breakdown['protocols'])[flow_key[4]] = 0
+
+            (breakdown['protocols'])[flow_key[4]] += flow_data[2]
+
+        return breakdown
+
+    def hwdb_extract(self, filedate, start_time_count=0, end_time_count=1440, BIN_SIZE=60):
+
+        self.filedate = filedate
+        print "Started extraction.."
+
+        #Flow file
+        ff = open('data/FLOWS/Flow' + self.filedate + '.db.dt', 'r')
+        print ff
+        flow_lines = ff.read().split('\n')
+        print len(flow_lines)
+        flow_breakdowns = {}
+        flow_bin = {}
+
+        start_timestamp = base_timestamp = mktime( (datetime.strptime((flow_lines[0])[0:19], "%Y/%m/%d:%H:%M:%S")).timetuple() )
+        print "Initial timestamp", start_timestamp        
+        #Modify start according to start_time_count
+        start_timestamp += ( (start_time_count-1) * 60)
+        print "Modified timestamp", start_timestamp
+        end_timestamp = start_timestamp + BIN_SIZE
+        
+        time_count = 1
 
         for line in flow_lines:
-            data_tuple = line.split('<|>')
 
-            #Empty last line, dumb but works
-            if(data_tuple[0] == ''):
-                    break
+            if(len(line) == 0):
+                break
+
+            flow_timestamp = mktime( (datetime.strptime(line[0:19], "%Y/%m/%d:%H:%M:%S")).timetuple() )
+
+            data_tuple = line[20:].split(':')
 
             flow_key = (
-                            data_tuple[2],      #SrcIP
-                            data_tuple[4],      #DstIP
+                            data_tuple[1],      #SrcIP
+                            data_tuple[2],      #DstIP
                             int(data_tuple[3]), #SrcPort
-                            int(data_tuple[5]), #DstPort
-                            int(data_tuple[1])  #Protocol
+                            int(data_tuple[4]), #DstPort
+                            int(data_tuple[0])  #Protocol
                         )
 
             flow_value = (
@@ -57,70 +234,35 @@ class FlowExtractor:
                                 1                   #Count
                             )
 
-            flow_timestamp = int(int((data_tuple[0])[1:-1], 16)/1e9)
-            bin_index = floor( (flow_timestamp - base_timestamp) / BIN_SIZE)
-
-            if bin_index >= len(flow_time_bins):
-                flow_time_bins.append({})
-            
-            if flow_key in (flow_time_bins[bin_index]):
-                (flow_time_bins[bin_index])[flow_key] = tuple(map(sum,zip( (flow_time_bins[bin_index])[flow_key], flow_value )))
+            if flow_timestamp >= start_timestamp and flow_timestamp < end_timestamp:
+                if flow_key in flow_bin:
+                    flow_bin[flow_key] = tuple(map(sum,zip( flow_bin[flow_key], flow_value )))
+                else:
+                    flow_bin[flow_key] = flow_value
+            elif flow_timestamp < start_timestamp:
+                continue
             else:
-                (flow_time_bins[bin_index])[flow_key] = flow_value
+                print "Calling breakdown..", time_count
+                self.breakdowns[start_timestamp] = self.calculate_breakdown(flow_bin)
+                flow_bin.clear()
+                start_timestamp = end_timestamp
+                end_timestamp = start_timestamp + BIN_SIZE
+                time_count += 1
+                if time_count > (end_time_count - (start_time_count-1)):
+                    break
 
-        return flow_time_bins
-
-    """
-    #Extracts individual flow entries per packet from a .pcap file of NetFlow v5 UDP packets
-    def pcap_extract(self, filename):
-        
-        flow_list = []
-        system_uptime = system_timestamp = 0
-        p = pcap.pcapObject()
-        packet_data = p.open_offline(filename)
-	
-        if not system_uptime or not self.system_timestamp:
-            system_uptime 	= self.hex_to_int(packet_data[46:50]) / 1000 	#Seconds since RFlow started
-            system_timestamp 	= self.hex_to_int(packet_data[50:54])			#UNIX timestamp of router
-            flow_packet = packet_data[66:] #Shift past header
-            
-        start_count = self.flow_count #Hold position to calculate FlowSequence
-        
-        while(len(flow_packet) > 0):
-
-            SrcIP, DstIP 	= socket.inet_ntoa(flow_packet[0:4]), socket.inet_ntoa(flow_packet[4:8])
-            SrcPort, DstPort	= self.hex_to_int(flow_packet[32:34]), self.hex_to_int(flow_packet[34:36])
-
-
-            TBD - Start or End time for flow timestamp
-            self.hex_to_int(flow_packet[28:32]) / 1000,	#EndTime
-
-            flow_list.append(
-                            self.FlowTuple(
-                                self.hex_to_int(flow_packet[24:28]) / 1000,	#StartTime - Timestamp
-                                SrcIP,						#SrcIP
-                                DstIP,						#DstIP
-                                SrcPort,					#SrcPort
-                                DstPort,					#DstPort
-                                int(self.hex_to_int(flow_packet[20:24])), 	#Bytes, (logarithm to base 2 and rounded to an integer)
-                                int(self.hex_to_int(flow_packet[16:20])),	#Packets, (logarithm to base 2 and rounded to an integer)
-                                self.hex_to_int(flow_packet[38]),		#Protocol
-                                )
-                            )
-
-            flow_packet = flow_packet[48:] #Shift to next flow entry
-            self.flow_count += 1
-
-        return flow_list
-    """
+        self.retrieve_retries()
+        return (self.breakdowns, self.ip_list)
 
     def __init__(self):
-        pass
+        self.filedate    = ''
+        self.ip_list     = []
+        self.breakdowns  = {}
 
 if __name__ == "__main__":
 
 # Method 1: Separation by time
 
     FE = FlowExtractor()
-    flows = FE.hwdb_extract('Flows-20110620000001.data')
+    flows = FE.hwdb_extract('20101219000001')
     print(len(flows),"flows extracted")
