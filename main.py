@@ -15,10 +15,8 @@ from pyrrd.graph import ColorAttributes, Graph
 import os, re
 from math import log
 
-IntIP_entropies = {}
-ExtIP_entropies = {}
-delta_IntIP_entropies = {}
-delta_ExtIP_entropies = {}
+flow_entropies = {}
+delta_flow_entropies = {}
 
 rras = []
 rra1 = RRA(cf='AVERAGE', xff=0, steps=1, rows=1440)
@@ -33,22 +31,49 @@ def calculate_entropies():
     last_entropies = []
     
     for flow_key in keys:
-        entropies = [0,0] # IntIP, ExtIP
+
+        entropies = { 'global_internal' : 0, 'global_external' : 0, 'internal' : {}, 'external' : {} } 
+
         total_flows      = flows[flow_key]['in_flows'] + flows[flow_key]['out_flows']
-        for idx, loc in enumerate(['internal', 'external']):
+
+        for loc in ['internal', 'external']:
             for IP in flows[flow_key][loc]:
+                
                 n_over_s = float(flows[flow_key][loc][IP]['in_flows'] + flows[flow_key][loc][IP]['out_flows']) / float(total_flows)
+
+                #Global entropy for Int/Ext IP
                 if n_over_s:
-                    entropies[idx]      += -( n_over_s ) * log( (n_over_s), 2)
-        IntIP_entropies[flow_key]   = entropies[0]
-        ExtIP_entropies[flow_key]   = entropies[1]
+                    entropies['global_' + loc]      += -( n_over_s ) * log( (n_over_s), 2)
+                #IP entropy
+                for dyn_IP in flows[flow_key][loc][IP]['ip_freq']:
+                    ip_n_over_s = float(flows[flow_key][loc][IP]['ip_freq'][dyn_IP]) / float(total_flows)
+                    #Fix, terribllll
+                    if IP in entropies[loc]:
+                        entropies[loc][dyn_IP] += -( ip_n_over_s ) * log( (n_over_s), 2)
+                    else:
+                        entropies[loc][dyn_IP] = -( ip_n_over_s ) * log( (n_over_s), 2)
+
+
+        flow_entropies[flow_key]   = entropies
         
         if flow_key != keys[0]:
-            delta_IntIP_entropies[flow_key] = entropies[0] - last_entropies[0]
-            delta_ExtIP_entropies[flow_key] = entropies[1] - last_entropies[1]
+            delta = {}
+
+            for key in ['internal', 'external']:
+
+                delta[key] = {}
+                delta['global_' + key] = entropies['global_' + key] - last_entropies['global_' + key] 
+
+                for IP in entropies[key]:
+                    if IP in last_entropies[key]:
+                        delta[key][IP] = entropies[key][IP] - last_entropies[key][IP]
+                    else:
+                        delta[key][IP] = entropies[key][IP]
+
+            delta_flow_entropies[flow_key] = delta
+
         else:
-            delta_IntIP_entropies[flow_key] = 0
-            delta_ExtIP_entropies[flow_key] = 0
+            delta_flow_entropies[flow_key] = entropies 
             
         last_key = flow_key
         last_entropies = entropies
@@ -96,12 +121,11 @@ def graph_totals(ip=None):
                 total_bytes = total_pkts = total_flows = 'U'
                 log_bytes = log_pkts = log_flows = 'U'
                 nretries = 'U'
-                
             myRRD.bufferValue(  int(flow_key), 
                                 total_bytes, total_pkts, total_flows,
                                 log_bytes, log_pkts, log_flows,
-                                0,0,#IntIP_entropies[flow_key], ExtIP_entropies[flow_key],
-                                0,0,#delta_IntIP_entropies[flow_key], delta_ExtIP_entropies[flow_key],
+                                flow_entropies[flow_key]['external'][ip] if ip in flow_entropies[flow_key]['external'] else 0, 0,
+                                delta_flow_entropies[flow_key]['external'][ip] if ip in flow_entropies[flow_key]['external'] else 0, 0,#delta_flow_entropies[flow_key]['internal'][ip],
                                 nretries,
                                 in_bytes, out_bytes, in_pkts, out_pkts, in_flows, out_flows,
                                 )
@@ -120,8 +144,8 @@ def graph_totals(ip=None):
             myRRD.bufferValue(  int(flow_key), 
                                 total_bytes, total_pkts, total_flows,
                                 log_bytes, log_pkts, log_flows,
-                                IntIP_entropies[flow_key], ExtIP_entropies[flow_key],
-                                delta_IntIP_entropies[flow_key], delta_ExtIP_entropies[flow_key],
+                                flow_entropies[flow_key]['global_external'], 0,#flow_entropies[flow_key]['global_internal'],
+                                delta_flow_entropies[flow_key]['global_external'], 0,#delta_flow_entropies[flow_key]['global_internal'],
                                 nretries,
                                 in_bytes, out_bytes, in_pkts, out_pkts, in_flows, out_flows,
                                 )
@@ -258,5 +282,7 @@ while True:
         jf.close()
         print "Appended to js file"
         for ip in iplist:
+            if ip == '192.168.1.1':
+              continue
             graph_totals(ip)
             print " - Processed %s" % str(ip)

@@ -148,7 +148,8 @@ class FlowExtractor:
                                                     'out_bytes' : 0,
                                                     'out_pkts'  : 0,
                                                     'out_flows' : 0,
-                                                    'nretries'  : 0
+                                                    'nretries'  : 0,
+                                                    'ip_freq'   : {} # Frequency of specific IP to an external IP
                                                 }
 
             if ExtIP not in breakdown['external']:
@@ -158,7 +159,8 @@ class FlowExtractor:
                                                     'in_flows'  : 0,
                                                     'out_bytes' : 0,
                                                     'out_pkts'  : 0,
-                                                    'out_flows' : 0
+                                                    'out_flows' : 0,
+                                                    'ip_freq'   : {} # Frequency of specific IP to an external IP
                                                 }
 
             if SrcIP == IntIP:  # Outbound
@@ -171,6 +173,7 @@ class FlowExtractor:
                 breakdown['out_bytes'] += flow_data[0]
                 breakdown['out_pkts'] += flow_data[1]
                 breakdown['out_flows'] += flow_data[2]
+
             else:               # Inbound
                 ((breakdown['internal'])[IntIP])['in_bytes']   += flow_data[0] 
                 ((breakdown['internal'])[IntIP])['in_pkts']    += flow_data[1]
@@ -181,6 +184,16 @@ class FlowExtractor:
                 breakdown['in_bytes'] += flow_data[0]
                 breakdown['in_pkts'] += flow_data[1]
                 breakdown['in_flows'] += flow_data[2]
+
+                if ExtIP in breakdown['internal'][IntIP]['ip_freq']:
+                    breakdown['internal'][IntIP]['ip_freq'][ExtIP] += flow_data[2]
+                else:
+                    breakdown['internal'][IntIP]['ip_freq'][ExtIP] = flow_data[2]
+
+                if IntIP in breakdown['external'][ExtIP]['ip_freq']:
+                    breakdown['external'][ExtIP]['ip_freq'][IntIP] += flow_data[2]
+                else:
+                    breakdown['external'][ExtIP]['ip_freq'][IntIP] = flow_data[2]
 
             if flow_key[2] not in breakdown['protocols']:
                 (breakdown['protocols'])[flow_key[4]] = 0
