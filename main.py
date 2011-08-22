@@ -109,8 +109,8 @@ def graph_totals(ip=None):
         if ip:
             if ip in flows[flow_key]['internal']:
                 in_bytes, out_bytes = (flows[flow_key])['internal'][ip]['in_bytes'], (flows[flow_key])['internal'][ip]['out_bytes']
-                in_pkts, out_pkts = (flows[flow_key])['internal'][ip]['in_bytes'], (flows[flow_key])['internal'][ip]['out_bytes']
-                in_flows, out_flows = (flows[flow_key])['internal'][ip]['in_bytes'], (flows[flow_key])['internal'][ip]['out_bytes']
+                in_pkts, out_pkts = (flows[flow_key])['internal'][ip]['in_pkts'], (flows[flow_key])['internal'][ip]['out_pkts']
+                in_flows, out_flows = (flows[flow_key])['internal'][ip]['in_flows'], (flows[flow_key])['internal'][ip]['out_flows']
                 total_bytes = in_bytes + out_bytes
                 total_pkts  = in_pkts + out_pkts
                 total_flows = in_flows + out_flows
